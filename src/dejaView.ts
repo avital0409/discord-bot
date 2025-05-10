@@ -1,6 +1,7 @@
 import { loadPostedVideos, savePostedVideos, StoredVideoData } from './storage';
 import { Client, Collection, GatewayIntentBits, Message, TextChannel } from 'discord.js';
 import dotenv from 'dotenv';
+import { logLevel, sendDebugLog } from './logger';
 
 dotenv.config();
 
@@ -52,10 +53,10 @@ const scanHistory = async (channel: TextChannel, postedVideos: StoredVideoData) 
 }
 
 client.once('ready', async () => {
-  console.log(`✅ Logged in as ${client.user?.tag}`);
+  await sendDebugLog(client, `Bot is online as ${client.user?.tag}.`, logLevel.INFO);
 
   if (!postedVideos.__scanned) {
-    console.log('🔍 Scanning message history in all text channels...');
+    await sendDebugLog(client, `Scanning message history in all text channels... 🔍`, logLevel.INFO);
 
     for (const [guildId, guild] of client.guilds.cache) {
       const fullGuild = await guild.fetch(); // Ensures full data
@@ -74,10 +75,9 @@ client.once('ready', async () => {
     postedVideos.__scanned = true;
     savePostedVideos(postedVideos);
 
-    console.log('✅ History scan complete.');
+    await sendDebugLog(client, `History scan complete.`, logLevel.INFO);
   }
-  console.log('✅ Waiting for requests...');
-
+  await sendDebugLog(client, `Waiting for requests...`, logLevel.INFO);
 });
 
 client.on('messageCreate', async (message) => {
@@ -91,7 +91,14 @@ client.on('messageCreate', async (message) => {
     const videoTitle = await getYouTubeTitle(videoId);
 
     if (postedVideos[videoId]) {
-      await message.delete();
+      await sendDebugLog(client, `Detected duplicate video request from ${message.author.tag} blocked in #${(message.channel as TextChannel).name}\n🎥 **${videoTitle}**`, logLevel.INFO);
+      try {
+        await message.delete();
+      } catch (error: any) {
+        if (error.code !== 10008) {
+          await sendDebugLog(client, `Failed to delete message: ${error}`, logLevel.ERROR);
+        }
+      }
 
       const msgLink = `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`;
       const response = `Hey ${message.author.username},\n`
@@ -99,8 +106,8 @@ client.on('messageCreate', async (message) => {
       + ` was already requested for reaction earlier here: ${msgLink}`
       + `\nFeel free to react to the original message if you want Shady to check it out! 🎬`;
       
-      message.author.send(response).catch(() => {
-        console.log(`DM failed for ${message.author.tag}`);
+      message.author.send(response).catch(async () => {
+        await sendDebugLog(client, `DM failed for ${message.author.tag}`, logLevel.WARN);
       });
 
       return;
@@ -110,6 +117,10 @@ client.on('messageCreate', async (message) => {
       savePostedVideos(postedVideos);
     }
   }
+});
+
+process.on('unhandledRejection', async (reason) => {
+  await sendDebugLog(client, `Unhandled Rejection: ${reason}`, logLevel.ERROR);
 });
 
 client.login(process.env.DISCORD_TOKEN);
